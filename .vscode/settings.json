@@ -1,0 +1,11 @@
+{
+  "python.defaultInterpreterPath": "/home/y/.venvs/auto-deploy-platform/bin/python",
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "files.eol": "\n",
+  "files.associations": {
+    "*.tpl.yaml": "yaml"
+  }
+}

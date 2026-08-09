@@ -1,0 +1,6 @@
+docker>=7.1,<8
+Flask>=3.0,<4
+kubernetes>=30,<35
+PyYAML>=6.0,<7
+requests>=2.31,<3
+

@@ -1,0 +1,9 @@
+# Run `crontab -e` in WSL and adapt paths if the project is moved.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Database/config backup every day at 02:00. cron_backup.sh loads the gitignored .env file.
+0 2 * * * /mnt/d/LYW/VSCode/OPS/auto-deploy-platform/scripts/cron_backup.sh >> /mnt/d/LYW/VSCode/OPS/auto-deploy-platform/logs/cron-backup.log 2>&1
+
+# Compress old logs and delete archives after the retention period.
+30 2 * * * /mnt/d/LYW/VSCode/OPS/auto-deploy-platform/scripts/log_clean.sh >> /mnt/d/LYW/VSCode/OPS/auto-deploy-platform/logs/cron-clean.log 2>&1

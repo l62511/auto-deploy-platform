@@ -1,0 +1,13 @@
+.env
+.venv*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+logs/*.log*
+releases/*.json
+releases/*.jsonl
+auto-deploy-platform.zip
+backups/
+.runtime/

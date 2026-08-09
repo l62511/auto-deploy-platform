@@ -1,0 +1,68 @@
+environment: test
+project_name: demo-app
+
+source:
+  repository: ""
+  branch: main
+  directory: app_dockerfile
+  dockerfile: Dockerfile
+
+registry:
+  address: localhost:5000
+  repository: demo-app
+  insecure: true
+
+build:
+  platform: linux/amd64
+  pull_base_images: true
+  pip_index_url: https://pypi.tuna.tsinghua.edu.cn/simple
+
+compose:
+  file: config/compose/docker-compose-test.yml
+  project_name: auto-deploy-test
+  service: web
+  health_url: http://127.0.0.1:28080/health
+  timeout: 150
+
+k8s:
+  namespace: auto-deploy-test
+  deployment_name: demo-app
+  service_name: demo-app
+  configmap_name: demo-app-config
+  secret_name: ""
+  container_name: demo-app
+  container_port: 5000
+  node_port: 30081
+  replicas: 2
+  timeout: 180
+  health_url: http://127.0.0.1:30081/health
+  templates:
+    deployment: config/k8s-tpl/deployment.tpl.yaml
+    service: config/k8s-tpl/service.tpl.yaml
+    configmap: config/k8s-tpl/configmap.tpl.yaml
+
+config_map:
+  APP_ENV: test
+  LOG_LEVEL: INFO
+  DEPENDENCY_CHECK_ENABLED: "false"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  MYSQL_HOST: mysql
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: demo
+  MYSQL_USER: demo
+
+precheck:
+  disk_threshold: 85
+  network_target: http://127.0.0.1:5000/v2/
+  required_free_ports: []
+  check_docker: true
+
+backup:
+  mysql_container: auto-deploy-test-mysql-1
+  mysql_database: demo
+  config_path: config
+  retention_days: 14
+
+alert:
+  webhook_env: WECHAT_WEBHOOK_URL
