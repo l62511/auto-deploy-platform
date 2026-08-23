@@ -3,4 +3,10 @@ Flask>=3.0,<4
 kubernetes>=30,<35
 PyYAML>=6.0,<7
 requests>=2.31,<3
-
+SQLAlchemy>=2.0,<3
+redis>=5,<7
+psycopg[binary]>=3.2,<4
+gunicorn>=23,<24
+alembic>=1.14,<2
+PyJWT[crypto]>=2.9,<3
+prometheus-client>=0.21,<1

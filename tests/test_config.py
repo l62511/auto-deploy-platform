@@ -23,4 +23,3 @@ def test_rejects_unsafe_versions(version: str) -> None:
 def test_rejects_unknown_environment() -> None:
     with pytest.raises(ConfigError):
         load_environment("production")
-

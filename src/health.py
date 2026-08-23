@@ -36,4 +36,3 @@ def wait_for_http_health(
     raise HealthCheckError(
         f"Health check did not pass within {timeout}s: {url}; last error: {last_error}"
     )
-

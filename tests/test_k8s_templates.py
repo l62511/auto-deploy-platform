@@ -27,12 +27,7 @@ def test_k8s_templates_render_typed_resources(tmp_path) -> None:
         "maxSurge": 1,
         "maxUnavailable": 0,
     }
-    assert deployment["spec"]["template"]["spec"]["containers"][0]["image"].endswith(
-        ":v1-dev"
-    )
+    assert deployment["spec"]["template"]["spec"]["containers"][0]["image"].endswith(":v1-dev")
     assert service["spec"]["ports"][0]["nodePort"] == 30080
     assert configmap["data"]["APP_ENV"] == "dev"
-    assert deployment["spec"]["template"]["metadata"]["annotations"][
-        "auto-deploy/config-hash"
-    ]
-
+    assert deployment["spec"]["template"]["metadata"]["annotations"]["auto-deploy/config-hash"]

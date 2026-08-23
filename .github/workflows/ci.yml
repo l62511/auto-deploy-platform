@@ -1,0 +1,68 @@
+name: quality-gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: ruff check src tests
+      - run: python -m pytest --cov=src --cov-report=term-missing
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt
+      - name: Scan repository for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: python -m compileall -q src app_dockerfile
+      - run: PLATFORM_DATABASE_URL=sqlite:///./.runtime/ci.db python -m src.migrate
+      - run: bash -n scripts/*.sh
+      - run: APP_IMAGE=localhost:5000/demo-app:ci docker compose --env-file .env.example -f config/compose/docker-compose-dev.yml config --quiet
+      - run: APP_IMAGE=localhost:5000/demo-app:ci docker compose --env-file .env.example -f config/compose/docker-compose-test.yml config --quiet
+      - run: POSTGRES_PASSWORD=ci-password GITEE_WEBHOOK_TOKEN=ci-token PLATFORM_HEALTH_TOKEN=ci-health JWT_SECRET=ci-jwt MYSQL_ROOT_PASSWORD=ci-root MYSQL_PASSWORD=ci-user docker compose --env-file .env.example -f config/compose/docker-compose-platform.yml config --quiet
+      - run: python -c "import pathlib,yaml; [yaml.safe_load_all(p.read_text()) for p in pathlib.Path('config/k8s').glob('*.yaml')]"
+
+      - name: Build platform image
+        run: docker build -f platform_dockerfile/Dockerfile -t auto-deploy-platform:ci .
+      - name: Scan platform image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: auto-deploy-platform:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+  compose-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start platform stack
+        run: |
+          cp .env.example .env
+          POSTGRES_PASSWORD=ci-password GITEE_WEBHOOK_TOKEN=ci-token PLATFORM_HEALTH_TOKEN=ci-health JWT_SECRET=ci-jwt MYSQL_ROOT_PASSWORD=ci-root MYSQL_PASSWORD=ci-user \
+            docker compose --env-file .env -f config/compose/docker-compose-platform.yml up -d --build
+      - name: Exercise worker Docker API path
+        env:
+          RUN_DOCKER_INTEGRATION: "1"
+        run: python -m pytest tests/integration/test_platform_compose.py -q
+      - name: Collect platform logs
+        if: always()
+        run: docker compose --env-file .env -f config/compose/docker-compose-platform.yml logs --no-color
+      - name: Stop platform stack
+        if: always()
+        run: docker compose --env-file .env -f config/compose/docker-compose-platform.yml down -v

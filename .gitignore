@@ -8,6 +8,8 @@ htmlcov/
 logs/*.log*
 releases/*.json
 releases/*.jsonl
+releases/*.db
 auto-deploy-platform.zip
 backups/
 .runtime/
+.ruff_cache/

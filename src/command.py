@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
 
 
 class CommandError(RuntimeError):
@@ -58,4 +58,3 @@ def run_command(
     if check and completed.returncode != 0:
         raise CommandError(command_list, completed.returncode, output)
     return CommandResult(command_list, completed.returncode, output)
-

@@ -5,7 +5,6 @@ import getpass
 import json
 import os
 import sys
-from pathlib import Path
 from typing import Any
 
 from .alert import WeChatAlert
@@ -109,11 +108,7 @@ def run_precheck(
         "NETWORK_TARGET": str(settings.get("network_target", "")),
         "REQUIRED_FREE_PORTS": ",".join(str(port) for port in ports),
         "CHECK_DOCKER": "1"
-        if (
-            settings.get("check_docker", True)
-            if require_docker is None
-            else require_docker
-        )
+        if (settings.get("check_docker", True) if require_docker is None else require_docker)
         else "0",
         "PROJECT_PATH": str(PROJECT_ROOT),
     }
@@ -156,6 +151,13 @@ def _run_backup(config: EnvironmentConfig, logger: Any) -> None:
 def _show_audit(limit: int) -> None:
     if limit < 1 or limit > 1000:
         raise ValueError("Audit limit must be between 1 and 1000")
+    database_url = os.getenv("PLATFORM_DATABASE_URL", "").strip()
+    if database_url and os.getenv("PLATFORM_FILE_AUDIT", "0") != "1":
+        from .control_plane import ControlPlaneStore
+
+        for event in ControlPlaneStore(database_url).list_audit(limit):
+            print(json.dumps(event, ensure_ascii=False, indent=2))
+        return
     path = PROJECT_ROOT / "releases" / "audit.jsonl"
     if not path.exists():
         print("No audit events recorded.")
@@ -189,9 +191,7 @@ def execute(args: argparse.Namespace, logger: Any) -> None:
     elif args.command == "backup":
         _run_backup(config, logger)
     elif args.command == "deploy":
-        run_precheck(
-            config, args.engine, logger, require_docker=args.engine == "compose"
-        )
+        run_precheck(config, args.engine, logger, require_docker=args.engine == "compose")
         image = args.image or config.image_ref(args.version)
         _deployer(args.engine, config, logger, audit, args.operator).deploy(
             image, version=args.version
@@ -205,9 +205,7 @@ def execute(args: argparse.Namespace, logger: Any) -> None:
             image, version=args.version
         )
     elif args.command == "rollback":
-        run_precheck(
-            config, args.engine, logger, require_docker=args.engine == "compose"
-        )
+        run_precheck(config, args.engine, logger, require_docker=args.engine == "compose")
         target = _deployer(args.engine, config, logger, audit, args.operator).rollback()
         print(target)
     elif args.command == "status":

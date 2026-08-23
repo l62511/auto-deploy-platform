@@ -9,7 +9,7 @@ from typing import Any
 import docker
 from docker.errors import BuildError, DockerException
 
-from .audit import AuditLog
+from .audit import AuditLog, ReleaseArtifactStore
 from .command import run_command
 from .config import EnvironmentConfig, validate_version
 
@@ -40,6 +40,13 @@ class ImageBuilder:
         if target_commit and not re.fullmatch(r"[0-9a-fA-F]{7,64}", target_commit):
             raise ImageBuildError("SOURCE_COMMIT must be a 7-64 character hexadecimal Git id")
 
+        # A webhook release must be built from its declared repository and commit.
+        # Falling back to the platform worktree would make the audit trail untrustworthy.
+        if target_commit and not repository:
+            raise ImageBuildError(
+                "SOURCE_COMMIT requires source.repository; refusing to build local files"
+            )
+
         if repository:
             if (directory / ".git").is_dir():
                 run_command(
@@ -53,10 +60,40 @@ class ImageBuilder:
             else:
                 directory.parent.mkdir(parents=True, exist_ok=True)
                 run_command(
-                    ["git", "clone", "--branch", branch, "--single-branch", repository, str(directory)],
+                    [
+                        "git",
+                        "clone",
+                        "--branch",
+                        branch,
+                        "--single-branch",
+                        repository,
+                        str(directory),
+                    ],
                     logger=self.logger,
                 )
             if target_commit:
+                run_command(
+                    ["git", "-C", str(directory), "fetch", "--prune", "origin", target_commit],
+                    logger=self.logger,
+                )
+                branch_ref = f"origin/{branch}"
+                membership = run_command(
+                    [
+                        "git",
+                        "-C",
+                        str(directory),
+                        "merge-base",
+                        "--is-ancestor",
+                        target_commit,
+                        branch_ref,
+                    ],
+                    check=False,
+                    logger=self.logger,
+                )
+                if membership.returncode != 0:
+                    raise ImageBuildError(
+                        f"SOURCE_COMMIT {target_commit} is not reachable from {branch_ref}"
+                    )
                 run_command(
                     ["git", "-C", str(directory), "checkout", "--detach", target_commit],
                     logger=self.logger,
@@ -152,10 +189,13 @@ class ImageBuilder:
                     self.logger.debug(message.rstrip())
             if push:
                 self._push(client, image_ref)
+                image_reference = self._immutable_reference(client, image_ref)
+            else:
+                image_reference = image_ref
         except BuildError as exc:
-            detail = "".join(
-                str(item.get("stream", item)) for item in (exc.build_log or [])
-            )[-4000:]
+            detail = "".join(str(item.get("stream", item)) for item in (exc.build_log or []))[
+                -4000:
+            ]
             self._audit(normalized_version, image_ref, "failed", detail or str(exc))
             raise ImageBuildError(f"Image build failed: {detail or exc}") from exc
         except DockerException as exc:
@@ -165,9 +205,22 @@ class ImageBuilder:
             self._audit(normalized_version, image_ref, "failed", str(exc))
             raise
 
-        self._audit(normalized_version, image_ref, "success", f"commit={commit or 'n/a'}")
-        self.logger.info("Image ready: %s", image_ref)
-        return image_ref
+        ReleaseArtifactStore().record(
+            environment=self.config.name,
+            version=normalized_version,
+            image_tag=image_ref,
+            image_reference=image_reference,
+            source_commit=commit,
+            source_repository=str(source.get("repository", "")).strip() or None,
+        )
+        self._audit(
+            normalized_version,
+            image_reference,
+            "success",
+            f"commit={commit or 'n/a'}; tag={image_ref}",
+        )
+        self.logger.info("Image ready: %s", image_reference)
+        return image_reference
 
     def cleanup_dangling(self) -> dict[str, Any]:
         try:
@@ -188,9 +241,19 @@ class ImageBuilder:
             if status:
                 self.logger.debug("Registry: %s", status)
 
-    def _audit(
-        self, version: str, image: str, result: str, detail: str | None = None
-    ) -> None:
+    def _immutable_reference(self, client: docker.DockerClient, image_ref: str) -> str:
+        """Return repository@sha256 digest after a successful push."""
+        repository = image_ref.rsplit(":", 1)[0]
+        image = client.images.get(image_ref)
+        repo_digests = image.attrs.get("RepoDigests") or []
+        for digest_reference in repo_digests:
+            if str(digest_reference).startswith(f"{repository}@sha256:"):
+                return str(digest_reference)
+        raise ImageBuildError(
+            f"Registry did not report an immutable digest for pushed image {image_ref}"
+        )
+
+    def _audit(self, version: str, image: str, result: str, detail: str | None = None) -> None:
         self.audit.record(
             action="build_push",
             environment=self.config.name,

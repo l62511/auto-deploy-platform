@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auto-deploy-platform-migrate
+  namespace: auto-deploy-system
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auto-deploy-platform
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: auto-deploy-platform
+      containers:
+        - name: migrate
+          image: auto-deploy-platform:local
+          command: ["python", "-m", "src.migrate"]
+          envFrom:
+            - secretRef:
+                name: auto-deploy-platform-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

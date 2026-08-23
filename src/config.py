@@ -7,7 +7,6 @@ from typing import Any
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
@@ -77,9 +76,7 @@ def load_environment(name: str, config_dir: Path | None = None) -> EnvironmentCo
 
     configured_name = data.get("environment")
     if configured_name != name:
-        raise ConfigError(
-            f"Configuration environment is {configured_name!r}, expected {name!r}"
-        )
+        raise ConfigError(f"Configuration environment is {configured_name!r}, expected {name!r}")
 
     config = EnvironmentConfig(name=name, data=data, source_file=source_file)
     for key in (
@@ -94,4 +91,3 @@ def load_environment(name: str, config_dir: Path | None = None) -> EnvironmentCo
     ):
         config.require(key)
     return config
-

@@ -1,0 +1,130 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: platform_dockerfile/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      APP_ENV: production
+      PLATFORM_REQUIRE_DURABLE: "1"
+      PLATFORM_AUTO_CREATE_SCHEMA: "0"
+      PLATFORM_DATABASE_URL: postgresql+psycopg://deploy:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/auto_deploy
+      PLATFORM_REDIS_URL: redis://redis:6379/0
+      GITEE_WEBHOOK_TOKEN: ${GITEE_WEBHOOK_TOKEN:?GITEE_WEBHOOK_TOKEN is required}
+      PLATFORM_HEALTH_TOKEN: ${PLATFORM_HEALTH_TOKEN:?PLATFORM_HEALTH_TOKEN is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}
+      AUTH_LOCAL_USERNAME: ${AUTH_LOCAL_USERNAME:-}
+      AUTH_LOCAL_PASSWORD: ${AUTH_LOCAL_PASSWORD:-}
+      AUTH_LOCAL_ROLES: ${AUTH_LOCAL_ROLES:-operator}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-}
+      HOOK_ENV: ${HOOK_ENV:-dev}
+      HOOK_ENGINE: ${HOOK_ENGINE:-compose}
+    volumes:
+      - ../:/app/config:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: platform_dockerfile/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "src.worker"]
+    environment:
+      APP_ENV: production
+      PLATFORM_REQUIRE_DURABLE: "1"
+      PLATFORM_AUTO_CREATE_SCHEMA: "0"
+      PLATFORM_DATABASE_URL: postgresql+psycopg://deploy:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/auto_deploy
+      PLATFORM_REDIS_URL: redis://redis:6379/0
+      DOCKER_HOST: tcp://docker-proxy:2375
+      GITEE_WEBHOOK_TOKEN: ${GITEE_WEBHOOK_TOKEN:?GITEE_WEBHOOK_TOKEN is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-demo}
+      MYSQL_USER: ${MYSQL_USER:-demo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      docker-proxy:
+        condition: service_started
+    volumes:
+      - ../:/app/config:ro
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.1.2
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      POST: "1"
+      BUILD: "1"
+      COMMIT: "1"
+      EXEC: "1"
+      INFO: "1"
+      NETWORKS: "1"
+      VOLUMES: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: platform_dockerfile/Dockerfile
+    command: ["python", "-m", "src.migrate"]
+    environment:
+      PLATFORM_DATABASE_URL: postgresql+psycopg://deploy:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/auto_deploy
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: auto_deploy
+      POSTGRES_USER: deploy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - platform_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deploy -d auto_deploy"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - platform_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  platform_postgres:
+    name: auto-deploy-platform-postgres
+  platform_redis:
+    name: auto-deploy-platform-redis

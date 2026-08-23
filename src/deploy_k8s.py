@@ -40,9 +40,7 @@ class K8sDeployer:
         self.settings = config.section("k8s")
         self.namespace = str(self.settings["namespace"])
         self.deployment_name = str(self.settings["deployment_name"])
-        self.container_name = str(
-            self.settings.get("container_name", config.data["project_name"])
-        )
+        self.container_name = str(self.settings.get("container_name", config.data["project_name"]))
         self.state = ReleaseStateStore(config.name, "k8s")
         if connect:
             self._load_client_configuration()
@@ -100,9 +98,7 @@ class K8sDeployer:
             )
             pods = self.core.list_namespaced_pod(
                 self.namespace,
-                label_selector=(
-                    f"app.kubernetes.io/name={self.config.data['project_name']}"
-                ),
+                label_selector=(f"app.kubernetes.io/name={self.config.data['project_name']}"),
             )
         except ApiException as exc:
             raise K8sDeploymentError(f"Unable to read Kubernetes status: {exc}") from exc
@@ -121,9 +117,7 @@ class K8sDeployer:
                     "phase": pod.status.phase,
                     "pod_ip": pod.status.pod_ip,
                     "ready": bool(pod.status.container_statuses)
-                    and all(
-                        status.ready for status in (pod.status.container_statuses or [])
-                    ),
+                    and all(status.ready for status in (pod.status.container_statuses or [])),
                 }
                 for pod in pods.items
             ],
@@ -131,8 +125,7 @@ class K8sDeployer:
 
     def render_resources(self, image: str) -> dict[str, dict[str, Any]]:
         config_data = {
-            str(key): str(value)
-            for key, value in self.config.section("config_map").items()
+            str(key): str(value) for key, value in self.config.section("config_map").items()
         }
         config_hash = hashlib.sha256(
             json.dumps(config_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -146,6 +139,9 @@ class K8sDeployer:
             ),
             "CONFIGMAP_NAME": str(self.settings["configmap_name"]),
             "CONTAINER_NAME": self.container_name,
+            "SERVICE_ACCOUNT_NAME": str(
+                self.settings.get("service_account_name", self.container_name)
+            ),
             "CONTAINER_PORT": int(self.settings.get("container_port", 5000)),
             "NODE_PORT": int(self.settings["node_port"]),
             "REPLICAS": int(self.settings.get("replicas", 2)),
@@ -161,17 +157,15 @@ class K8sDeployer:
 
         secret_name = str(self.settings.get("secret_name", "")).strip()
         if secret_name:
-            containers = resources["deployment"]["spec"]["template"]["spec"][
-                "containers"
-            ]
+            containers = resources["deployment"]["spec"]["template"]["spec"]["containers"]
             containers[0].setdefault("envFrom", []).append(
                 {"secretRef": {"name": secret_name, "optional": False}}
             )
         image_pull_secret = str(self.settings.get("image_pull_secret", "")).strip()
         if image_pull_secret:
-            resources["deployment"]["spec"]["template"]["spec"][
-                "imagePullSecrets"
-            ] = [{"name": image_pull_secret}]
+            resources["deployment"]["spec"]["template"]["spec"]["imagePullSecrets"] = [
+                {"name": image_pull_secret}
+            ]
         return resources
 
     def _load_and_render_template(
@@ -188,9 +182,7 @@ class K8sDeployer:
 
     def _substitute(self, value: Any, replacements: dict[str, Any]) -> Any:
         if isinstance(value, dict):
-            return {
-                key: self._substitute(item, replacements) for key, item in value.items()
-            }
+            return {key: self._substitute(item, replacements) for key, item in value.items()}
         if isinstance(value, list):
             return [self._substitute(item, replacements) for item in value]
         if isinstance(value, str):
@@ -205,18 +197,14 @@ class K8sDeployer:
                     {key: str(item) for key, item in replacements.items()}
                 )
             except KeyError as exc:
-                raise K8sDeploymentError(
-                    f"Missing template value: {exc.args[0]}"
-                ) from exc
+                raise K8sDeploymentError(f"Missing template value: {exc.args[0]}") from exc
         return value
 
     def _load_client_configuration(self) -> None:
         kubeconfig = str(self.settings.get("kubeconfig", "")).strip()
         try:
             if kubeconfig:
-                kube_config.load_kube_config(
-                    config_file=str(Path(kubeconfig).expanduser())
-                )
+                kube_config.load_kube_config(config_file=str(Path(kubeconfig).expanduser()))
             else:
                 kube_config.load_kube_config()
         except Exception as local_error:
@@ -224,8 +212,7 @@ class K8sDeployer:
                 kube_config.load_incluster_config()
             except Exception as cluster_error:
                 raise K8sDeploymentError(
-                    "Unable to load Kubernetes configuration: "
-                    f"{local_error}; {cluster_error}"
+                    f"Unable to load Kubernetes configuration: {local_error}; {cluster_error}"
                 ) from cluster_error
 
     def _ensure_namespace(self) -> None:
@@ -234,14 +221,10 @@ class K8sDeployer:
         except ApiException as exc:
             if exc.status != 404:
                 raise
-            self.core.create_namespace(
-                {
-                    "apiVersion": "v1",
-                    "kind": "Namespace",
-                    "metadata": {"name": self.namespace},
-                }
-            )
-            self.logger.info("Created namespace %s", self.namespace)
+            raise K8sDeploymentError(
+                f"Namespace {self.namespace!r} is not provisioned; apply "
+                "config/k8s/platform-namespace.yaml first"
+            ) from exc
 
     def _apply_configmap(self, body: dict[str, Any]) -> None:
         name = body["metadata"]["name"]
@@ -280,9 +263,7 @@ class K8sDeployer:
             self.logger.info("Created Deployment %s", name)
 
     def _set_deployment_image(self, image: str) -> None:
-        body = self.apps.read_namespaced_deployment(
-            self.deployment_name, self.namespace
-        )
+        body = self.apps.read_namespaced_deployment(self.deployment_name, self.namespace)
         found = False
         for container in body.spec.template.spec.containers:
             if container.name == self.container_name:
@@ -293,9 +274,7 @@ class K8sDeployer:
                 f"Container {self.container_name!r} not found in "
                 f"Deployment {self.deployment_name!r}"
             )
-        self.apps.patch_namespaced_deployment(
-            self.deployment_name, self.namespace, body
-        )
+        self.apps.patch_namespaced_deployment(self.deployment_name, self.namespace, body)
 
     def _wait_for_rollout(self) -> None:
         timeout = int(self.settings.get("timeout", 180))
@@ -318,9 +297,7 @@ class K8sDeployer:
                     and condition.status == "False"
                     and condition.reason == "ProgressDeadlineExceeded"
                 ):
-                    raise K8sDeploymentError(
-                        f"Rollout stopped progressing: {condition.message}"
-                    )
+                    raise K8sDeploymentError(f"Rollout stopped progressing: {condition.message}")
             if (
                 status.observed_generation == deployment.metadata.generation
                 and (status.updated_replicas or 0) == desired

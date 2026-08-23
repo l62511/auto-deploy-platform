@@ -25,10 +25,20 @@ spec:
       annotations:
         auto-deploy/config-hash: ${CONFIG_HASH}
     spec:
+      serviceAccountName: ${SERVICE_ACCOUNT_NAME}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: ${CONTAINER_NAME}
           image: ${IMAGE}
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: ${CONTAINER_PORT}
@@ -58,4 +68,3 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
-

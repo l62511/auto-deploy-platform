@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auto-deploy-system
+  labels:
+    app.kubernetes.io/name: auto-deploy-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auto-deploy-dev
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auto-deploy-test

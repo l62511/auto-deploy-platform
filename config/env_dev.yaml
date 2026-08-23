@@ -1,10 +1,14 @@
 environment: dev
 project_name: demo-app
 
+release:
+  approval_required: false
+
 source:
+# Required before enabling the Gitee webhook. When set, point directory at an empty managed path.
   repository: ""
   branch: main
-  directory: app_dockerfile
+  directory: app_dockerfile # e.g. .runtime/sources/demo-app for a remote repository
   dockerfile: Dockerfile
 
 registry:
@@ -31,6 +35,7 @@ k8s:
   configmap_name: demo-app-config
   secret_name: ""
   container_name: demo-app
+  service_account_name: demo-app
   container_port: 5000
   node_port: 30080
   replicas: 2

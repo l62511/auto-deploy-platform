@@ -45,4 +45,3 @@ class WeChatAlert:
         except Exception as exc:
             self.logger.error("Unable to send Enterprise WeChat alert: %s", exc)
             return False
-

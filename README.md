@@ -18,7 +18,7 @@ WSL IP:  172.24.105.133（WSL 重启后可能变化）
 | 镜像管理 | Git clone/pull、多阶段构建、环境 Tag、私有 Registry 推送、悬空镜像清理 |
 | Compose 引擎 | dev/test 隔离、Web + Redis + MySQL、Nginx 网关、健康检查、重启/停止/扩容、失败自动回滚 |
 | K3s 引擎 | Deployment、NodePort Service、ConfigMap、可选 Secret、滚动更新、就绪探测、失败自动回滚 |
-| 发布管控 | 操作人/时间/版本/环境/结果 JSONL 审计，最近 50 次成功发布状态，HTTP 健康探测 |
+| 发布管控 | PostgreSQL 持久化任务、审批、审计和发布状态，Redis 队列，HTTP 健康探测 |
 | CI 与告警 | Gitee Push WebHook、Token/分支校验、后台串行发布、企业微信机器人失败告警 |
 
 ## 架构
@@ -35,7 +35,7 @@ flowchart LR
     Core --> K3s["K3s API"]
     Compose --> Health["HTTP 健康校验"]
     K3s --> Health
-    Core --> Audit["JSONL 审计 / 发布状态"]
+    Core --> Audit["PostgreSQL 审计 / 发布状态"]
     Core --> WeChat["企业微信告警"]
 ```
 
@@ -58,7 +58,7 @@ auto-deploy-platform/
 ├── src/                     # Python 调度、构建、发布、审计、Webhook、告警
 ├── tests/                   # 不依赖真实集群的单元测试
 ├── logs/                    # 轮转运行日志
-└── releases/                # JSONL 审计和各引擎发布状态
+└── releases/                # 本地开发时的审计/状态回退文件
 ```
 
 ## 1. 初始化 WSL 环境
@@ -198,7 +198,7 @@ kubectl -n auto-deploy-dev create secret generic demo-app-secret \
 
 ## 5. Gitee WebHook
 
-先把 `config/env_dev.yaml` 的 `source.repository` 改为业务仓库 HTTPS/SSH 地址，并确认 WSL 已配置读取该仓库的凭据。Webhook 会精确检出 Gitee 事件中的完整提交 SHA，镜像 Tag 使用前 12 位，OCI revision 标签保存完整 SHA。
+先把 `config/env_dev.yaml` 的 `source.repository` 改为业务仓库 HTTPS/SSH 地址，并确认 WSL 已配置读取该仓库的凭据。同时将 `source.directory` 改为平台管理的空目录，例如 `.runtime/sources/demo-app`，不要复用内置示例目录。Webhook 会精确检出 Gitee 事件中的完整提交 SHA，镜像 Tag 使用前 12 位，OCI revision 标签保存完整 SHA。该字段为空时 Webhook 返回 `503`，不会将远程提交错误映射到本地示例目录。
 
 先在 `.env` 中设置随机 Token，然后导出变量并启动服务：
 
@@ -227,7 +227,44 @@ curl -X POST http://127.0.0.1:9000/webhook/gitee \
   -d '{"ref":"refs/heads/main","after":"1234567890abcdef1234567890abcdef12345678"}'
 ```
 
-服务立即返回 `202`，后台运行流水线；`GET /health` 可查看最近任务结果。并发 Push 返回 `409`，避免同一环境发生交叉发布。
+服务立即返回 `202`，后台运行流水线；`GET /health` 可查看最近任务结果。并发 Push 返回 `409`，避免同一环境发生交叉发布。服务会在 `.runtime/` 保存环境级发布锁和最近任务状态；`HOOK_PIPELINE_TIMEOUT` 默认限制单次流水线为 1800 秒。成功构建会追加 `releases/artifacts.jsonl`，记录仓库、提交 SHA、镜像 tag 和 Registry digest；推送后部署使用不可变的 `repository@sha256:...` 引用。
+
+生产环境配置 `PLATFORM_DATABASE_URL`（PostgreSQL）和 `PLATFORM_REDIS_URL` 后，Webhook 只创建持久化任务并写入 Redis 队列，由独立 worker 执行：
+
+```bash
+$PY -m src.worker
+```
+
+任务状态保存在 `deployment_tasks` 表，使用 Gitee delivery id 或提交 SHA 作为幂等键。未配置 Redis 时仅用于本地开发，会回退到进程内线程执行。公开 `/health` 只返回存活状态；任务详情必须使用 `X-Health-Token: $PLATFORM_HEALTH_TOKEN` 请求 `/health/details`。
+单个任务可通过 `GET /tasks/<task_id>` 查询，同样需要 `X-Health-Token`；任务输出只保存在受保护的控制面存储中。
+
+启用 `HOOK_APPROVAL_REQUIRED=1` 或环境配置中的 `release.approval_required: true` 后，Webhook 会先创建 `pending_approval` 发布。具备 `approver` 或 `admin` 角色的 JWT 才能审批。状态机为 `pending_approval -> queued -> running -> succeeded|failed|cancelled`，拒绝路径为 `pending_approval -> rejected`。worker 启动时会把超时的 `running` 任务重新放回 PostgreSQL/Redis，支持进程崩溃恢复。
+
+平台控制面可以用 Compose 启动（生产示例会强制 PostgreSQL、Redis 和 Gunicorn）：
+
+```bash
+docker compose --env-file .env -f config/compose/docker-compose-platform.yml up -d --build
+curl http://127.0.0.1:9000/health
+```
+
+本地登录测试：
+
+```bash
+TOKEN=$(curl -sS -X POST http://127.0.0.1:9000/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"operator","password":".env 中 AUTH_LOCAL_PASSWORD 的值"}' | jq -r .access_token)
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9000/health/details
+```
+
+生产环境应清空 `AUTH_LOCAL_*`，配置 OIDC `issuer/audience/jwks_url`，并通过身份提供商签发带 `roles` 或 `groups` claim 的 JWT。
+
+该 Compose 形态用于管理同一主机上的 Docker Compose 目标。worker 通过 `tecnativa/docker-socket-proxy` 暴露的受限 Docker API（`DOCKER_HOST=tcp://docker-proxy:2375`）访问容器运行时。部署 K3s 时应先应用 `config/k8s/platform-namespace.yaml`、`platform-secrets.example.yaml`、`platform-migration-job.yaml` 和 RBAC 清单，再将 API 与 worker 部署到集群。
+
+平台 Compose 集成测试需要 Docker Desktop：
+
+```bash
+RUN_DOCKER_INTEGRATION=1 $PY -m pytest tests/integration/test_platform_compose.py -q
+```
 
 ## 6. 企业微信告警
 
@@ -265,7 +302,7 @@ APP_IMAGE=localhost:5000/demo-app:v1-dev \
 关键文件：
 
 - `logs/platform.log`：程序调试日志，Python 内置 RotatingFileHandler 自动轮转。
-- `releases/audit.jsonl`：每次构建、发布、回滚、扩缩容的不可变追加审计记录。
+- `audit_events`、`release_states`、`approval_requests`：生产模式下统一存储在 PostgreSQL；`releases/*.jsonl` 仅作为显式文件回退。
 - `releases/dev-compose-state.json`：Compose 最近成功镜像和历史。
 - `releases/dev-k8s-state.json`：K3s 最近成功镜像和历史。
 

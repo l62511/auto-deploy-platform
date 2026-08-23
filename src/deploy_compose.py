@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from .audit import AuditLog, ReleaseStateStore
 from .command import CommandResult, run_command
