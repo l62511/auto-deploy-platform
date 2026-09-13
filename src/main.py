@@ -7,7 +7,7 @@ import os
 import sys
 from typing import Any
 
-from .alert import WeChatAlert
+from .alert import EmailAlert
 from .audit import AuditLog
 from .builder import ImageBuilder
 from .command import run_command
@@ -244,7 +244,7 @@ def main() -> int:
             "Operation failed: %s", exc
         )
         if config:
-            WeChatAlert(config, logger).send(
+                EmailAlert(config, logger).send(
                 "Auto deployment failed", f"{args.command}: {exc}", level="error"
             )
         return 1

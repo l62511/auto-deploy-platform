@@ -70,4 +70,9 @@ backup:
   retention_days: 14
 
 alert:
-  webhook_env: WECHAT_WEBHOOK_URL
+  smtp_host_env: SMTP_HOST
+  smtp_port_env: SMTP_PORT
+  smtp_user_env: SMTP_USERNAME
+  smtp_password_env: SMTP_PASSWORD
+  smtp_starttls_env: SMTP_STARTTLS
+  sender_env: ALERT_EMAIL_FROM
