@@ -163,16 +163,3 @@ releases/             本地审计、制品和状态文件
 | K3s ImagePullBackOff | 检查 Registry 地址、containerd 信任配置和镜像 Digest |
 | 发布超时 | 查看 Pod 事件、就绪探针、NodePort 访问和外部健康 URL |
 | 邮件未收到 | 检查 SMTP 授权码、端口、防火墙、STARTTLS 和发件人地址 |
-
-## 当前不足与后续建议
-
-项目适合单机和学习场景，生产化时建议按以下优先级完善：
-
-1. **高优先级安全项**：增加 WebHook 请求时间戳/重放保护、反向代理 HTTPS、SMTP TLS 强制校验、密钥轮换和 Secret 管理规范。
-2. **高优先级可靠性**：为 Redis/PostgreSQL 增加连接重试和故障告警；补充数据库、Registry 和发布状态的异地备份及恢复演练。
-3. **发布能力**：增加金丝雀/分批发布、人工暂停、超时任务取消和更细粒度的并发策略。
-4. **可观测性**：扩展构建耗时、队列积压、回滚次数、健康检查失败原因等指标，并提供 Grafana Dashboard 和告警规则。
-5. **测试覆盖**：补充 SMTP、OIDC/JWKS、Redis 故障、数据库并发、Webhook 重放、K3s API 异常和回滚失败场景测试。
-6. **工程质量**：在 CI 中固定执行 lint、类型检查、ShellCheck、依赖漏洞扫描和 Docker 镜像扫描；为 API 增加 OpenAPI 文档。
-
-这些项目不影响当前 Compose/K3s 单机发布链路，但会影响多节点、高并发和公网生产环境的安全性与可运维性。
