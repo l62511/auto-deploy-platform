@@ -113,3 +113,66 @@ src/                  调度、构建、发布、控制面和告警
 tests/                单元测试和集成测试
 releases/             本地审计、制品和状态文件
 ```
+
+## 配置参考
+
+每个环境由 `config/env_<name>.yaml` 描述：
+
+- `source`：源码仓库、分支、检出目录和 Dockerfile。
+- `registry`：镜像仓库地址、仓库名及是否使用非 TLS Registry。
+- `build`：构建平台、是否拉取基础镜像和 pip 源。
+- `compose`：Compose 文件、Project Name、服务名和健康检查地址。
+- `k8s`：Namespace、Deployment、Service、ConfigMap、NodePort、副本数和模板路径。
+- `config_map`：注入应用的非敏感环境变量。
+- `precheck`：磁盘阈值、网络探测地址、端口和 Docker 检查开关。
+- `backup`：MySQL 容器、数据库、配置目录和保留天数。
+- `release.approval_required`：是否要求人工审批。
+
+敏感值只放在 `.env` 或 Kubernetes Secret 中，不要写入 YAML、镜像标签、日志和 Git。生产控制面至少应设置 `PLATFORM_DATABASE_URL`、`PLATFORM_REDIS_URL`、`JWT_SECRET`、`GITEE_WEBHOOK_TOKEN`、`PLATFORM_HEALTH_TOKEN` 和数据库密码。
+
+## 运维检查清单
+
+发布前：
+
+- 检查 Docker Desktop、K3s API 和私有 Registry 状态。
+- 确认目标端口、磁盘空间和网络连通性。
+- 确认源码仓库凭据、Webhook Token 和当前分支配置。
+- 确认目标环境的数据库、Redis 和持久化卷正常。
+
+发布中：
+
+- 观察 `logs/platform.log`、任务状态和 `/metrics`。
+- Compose 使用 `docker compose logs`；K3s 使用 `kubectl describe`、Pod 事件和 Deployment 状态。
+- 健康检查超时会触发自动回滚，回滚失败必须人工介入。
+
+发布后：
+
+- 执行 `status` 和业务 `/health` 检查。
+- 核对审计事件、镜像 Digest 和实际运行镜像。
+- 确认备份任务和日志清理定时任务仍在运行。
+
+## 故障排查
+
+| 现象 | 排查方向 |
+| --- | --- |
+| WebHook 返回 `401` | 检查 `GITEE_WEBHOOK_TOKEN` 和请求头 `X-Gitee-Token` |
+| WebHook 返回 `409` | 同一环境已有任务运行，检查 Redis 队列和 Lease |
+| 镜像构建失败 | 检查 Docker daemon、源码目录、Dockerfile 和基础镜像网络 |
+| Registry 推送失败 | 检查 Registry 容器、地址、认证和 K3s `registries.yaml` |
+| Compose unhealthy | 查看 `docker compose logs`，确认 MySQL/Redis 健康检查和密码 |
+| K3s ImagePullBackOff | 检查 Registry 地址、containerd 信任配置和镜像 Digest |
+| 发布超时 | 查看 Pod 事件、就绪探针、NodePort 访问和外部健康 URL |
+| 邮件未收到 | 检查 SMTP 授权码、端口、防火墙、STARTTLS 和发件人地址 |
+
+## 当前不足与后续建议
+
+项目适合单机和学习场景，生产化时建议按以下优先级完善：
+
+1. **高优先级安全项**：增加 WebHook 请求时间戳/重放保护、反向代理 HTTPS、SMTP TLS 强制校验、密钥轮换和 Secret 管理规范。
+2. **高优先级可靠性**：为 Redis/PostgreSQL 增加连接重试和故障告警；补充数据库、Registry 和发布状态的异地备份及恢复演练。
+3. **发布能力**：增加金丝雀/分批发布、人工暂停、超时任务取消和更细粒度的并发策略。
+4. **可观测性**：扩展构建耗时、队列积压、回滚次数、健康检查失败原因等指标，并提供 Grafana Dashboard 和告警规则。
+5. **测试覆盖**：补充 SMTP、OIDC/JWKS、Redis 故障、数据库并发、Webhook 重放、K3s API 异常和回滚失败场景测试。
+6. **工程质量**：在 CI 中固定执行 lint、类型检查、ShellCheck、依赖漏洞扫描和 Docker 镜像扫描；为 API 增加 OpenAPI 文档。
+
+这些项目不影响当前 Compose/K3s 单机发布链路，但会影响多节点、高并发和公网生产环境的安全性与可运维性。
